@@ -8,7 +8,7 @@ import thread
 import dlib
 import numpy as np
 from sensor_msgs.msg import Image
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32,Float32
 from pyzbar import pyzbar
 from cv_bridge import CvBridge, CvBridgeError
 from laikago_tracker.srv import tracking_target,tracking_targetResponse
@@ -45,17 +45,22 @@ class Tracker:
         self.pid_pitch.output_limits = (-0.1, 0.1)
 
         self.pid_sideSpeed = PID(self.P, self.I, self.D, setpoint=320)
-        self.pid_sideSpeed.output_limits = (-0.1, 0.1)
+        self.pid_sideSpeed.output_limits = (-1.0, 1.0)
         self.pid_rotateSpeed = PID(self.P, self.I, self.D, setpoint=320)
-        self.pid_rotateSpeed.output_limits = (-0.1, 0.1)
+        self.pid_rotateSpeed.output_limits = (-1.0, 1.0)
         
+        self.last_state = None
 
         self.cur_X = rospy.Publisher('/laikago_traker/cur_X',Int32,queue_size=10)
         self.tar_X = rospy.Publisher('/laikago_traker/tar_X',Int32,queue_size=10)
         self.cur_Y = rospy.Publisher('/laikago_traker/cur_Y',Int32,queue_size=10)
         self.tar_Y = rospy.Publisher('/laikago_traker/tar_Y',Int32,queue_size=10)
-
+        self.cmd_yaw = rospy.Publisher('/laikago_traker/cmd_yaw',Float32,queue_size=10)
+        self.cmd_pitch = rospy.Publisher('/laikago_traker/cmd_pitch',Float32,queue_size=10)
+        self.cmd_mode = rospy.Publisher('/laikago_traker/cmd_mode',Int32,queue_size=10)
+        
         self.safe_distance = 1 # m
+        
         self.pid_forwardSpeed = PID(0.8, 0.0, 0.0015, setpoint=self.safe_distance)
         self.pid_forwardSpeed.output_limits = (-1.0,1.0)
     def algorithm_init(self):
@@ -121,22 +126,9 @@ class Tracker:
         # x,y,w,h = self.track_wnd
         # cv2.rectangle(image, (x,y), (x+w,y+h), (255, 255, 255), 3)
 
-
         image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
         image = cv2.resize(image, (320,240), interpolation = cv2.INTER_AREA)
         return image, obj_center
-
-    def sendHighCmd(self,mode=0,forwardSpeed=0.0,sideSpeed=0.0,rotateSpeed=0.0,roll=0.0,pitch=0.0,yaw=0.0):
-        self.SendHighROS.mode = mode
-        self.SendHighROS.forwardSpeed = forwardSpeed
-        self.SendHighROS.sideSpeed = sideSpeed
-        self.SendHighROS.rotateSpeed = rotateSpeed
-
-        self.SendHighROS.roll  = roll
-        self.SendHighROS.pitch = pitch
-        self.SendHighROS.yaw = yaw
-
-        self.high_cmd_pub.publish(self.SendHighROS)
 
     def sub_callback(self,image,depth,state):
 
@@ -172,19 +164,16 @@ class Tracker:
                 self.SendHighROS.mode = 0
             elif distance > safe_distance:
                 self.SendHighROS.mode = 2
-                # self.SendHighROS.roll  = 0
-                # self.SendHighROS.pitch = 0
-                # self.SendHighROS.yaw = 0
+                self.SendHighROS.roll  = 0
+                self.SendHighROS.pitch = 0
+                self.SendHighROS.yaw = 0
                 
-                # self.pid_yaw.reset()
-                # self.pid_pitch.reset()
-
                 self.SendHighROS.forwardSpeed = self.pid_forwardSpeed(-distance)
-                self.SendHighROS.sideSpeed = self.pid_sideSpeed(-distance)
-                self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(-distance)
+                self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
+                self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
                 rospy.loginfo("speed: %f distance: %f",self.SendHighROS.forwardSpeed,distance)
 
-            if state.mode == 0:
+            if state.forwardSpeed == 0:
                 
                 self.SendHighROS.yaw -= self.pid_yaw(target_center[0])
                 if self.SendHighROS.yaw < -1.0: self.SendHighROS.yaw = -1.0
@@ -200,7 +189,11 @@ class Tracker:
                 self.tar_Y.publish(240)
                 # rospy.loginfo("pitch: %f  distance: %f" % (self.SendHighROS.pitch,distance))
 
+        self.last_state = state
         self.high_cmd_pub.publish(self.SendHighROS)
+        self.cmd_yaw.publish(self.SendHighROS.yaw)
+        self.cmd_pitch.publish(self.SendHighROS.pitch)
+        self.cmd_mode.publish(state.mode)
 
         if self.selected:
             cv_image, target_center = self.algorithm_run(cv_image)
