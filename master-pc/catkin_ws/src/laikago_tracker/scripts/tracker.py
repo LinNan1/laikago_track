@@ -14,7 +14,7 @@ from cv_bridge import CvBridge, CvBridgeError
 from laikago_tracker.srv import tracking_target,tracking_targetResponse
 from laikago_msgs.msg import HighCmd, HighState
 from simple_pid import PID
-# laikago_tracker/tracking_target
+# laikago_tracker/tracking_targe
 
 class Tracker:
     def __init__(self):
@@ -44,12 +44,14 @@ class Tracker:
         self.pid_pitch = PID(self.P, self.I, self.D, setpoint=240)
         self.pid_pitch.output_limits = (-0.1, 0.1)
 
-        self.pid_sideSpeed = PID(self.P, self.I, self.D, setpoint=320)
+        self.pid_sideSpeed = PID(0.002, 0.0, 0.0002, setpoint=320)
         self.pid_sideSpeed.output_limits = (-1.0, 1.0)
-        self.pid_rotateSpeed = PID(self.P, self.I, self.D, setpoint=320)
+        self.pid_rotateSpeed = PID(0.02, 0.0, 0.0002, setpoint=320)
         self.pid_rotateSpeed.output_limits = (-1.0, 1.0)
-        
-        self.last_state = None
+
+        self.safe_distance = 1 # m
+        self.pid_forwardSpeed = PID(0.08, 0.0, 0.0015, setpoint=self.safe_distance)
+        self.pid_forwardSpeed.output_limits = (-1.0,1.0)
 
         self.cur_X = rospy.Publisher('/laikago_traker/cur_X',Int32,queue_size=10)
         self.tar_X = rospy.Publisher('/laikago_traker/tar_X',Int32,queue_size=10)
@@ -57,12 +59,9 @@ class Tracker:
         self.tar_Y = rospy.Publisher('/laikago_traker/tar_Y',Int32,queue_size=10)
         self.cmd_yaw = rospy.Publisher('/laikago_traker/cmd_yaw',Float32,queue_size=10)
         self.cmd_pitch = rospy.Publisher('/laikago_traker/cmd_pitch',Float32,queue_size=10)
-        self.cmd_mode = rospy.Publisher('/laikago_traker/cmd_mode',Int32,queue_size=10)
+        self.cmd_rotateSpeed = rospy.Publisher('/laikago_traker/cmd_rotateSpeed',Float32,queue_size=10)
         
-        self.safe_distance = 1 # m
         
-        self.pid_forwardSpeed = PID(0.8, 0.0, 0.0015, setpoint=self.safe_distance)
-        self.pid_forwardSpeed.output_limits = (-1.0,1.0)
     def algorithm_init(self):
         # correlation
         # self.object_tracker = dlib.correlation_tracker()
@@ -160,40 +159,40 @@ class Tracker:
         
         if target_center != (-1,-1):
             distance = depth_array[target_center[1]][target_center[0]]/1000
-            if distance <= safe_distance:
+            tmp = 0.7
+            if distance <= safe_distance and (320 - tmp*320) < target_center[0]< (320 + tmp*320):
                 self.SendHighROS.mode = 0
-            elif distance > safe_distance:
+                if state.forwardSpeed = 0.0
+                    self.SendHighROS.yaw -= self.pid_yaw(target_center[0])
+                    if self.SendHighROS.yaw < -1.0: self.SendHighROS.yaw = -1.0
+                    elif self.SendHighROS.yaw > 1.0: self.SendHighROS.yaw = 1.0
+                    self.SendHighROS.pitch -= self.pid_pitch(target_center[1])
+                    if self.SendHighROS.pitch < -1.0: self.SendHighROS.pitch = -1.0
+                    elif self.SendHighROS.pitch > 1.0: self.SendHighROS.pitch = 1.0
+                else:
+                    self.SendHighROS.roll  = 0
+                    self.SendHighROS.pitch = 0
+                    self.SendHighROS.yaw = 0
+                    self.pid_pitch.reset()
+                    self.pid_yaw.reset()
+            else:
                 self.SendHighROS.mode = 2
-                self.SendHighROS.roll  = 0
-                self.SendHighROS.pitch = 0
-                self.SendHighROS.yaw = 0
-                
                 self.SendHighROS.forwardSpeed = self.pid_forwardSpeed(-distance)
                 self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
                 self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
-                rospy.loginfo("speed: %f distance: %f",self.SendHighROS.forwardSpeed,distance)
+            
+            
+            # rospy.loginfo("pitch: %f  distance: %f" % (self.SendHighROS.pitch,distance))
 
-            if state.forwardSpeed == 0:
-                
-                self.SendHighROS.yaw -= self.pid_yaw(target_center[0])
-                if self.SendHighROS.yaw < -1.0: self.SendHighROS.yaw = -1.0
-                elif self.SendHighROS.yaw > 1.0: self.SendHighROS.yaw = 1.0
-
-                self.SendHighROS.pitch -= self.pid_pitch(target_center[1])
-                if self.SendHighROS.pitch < -1.0: self.SendHighROS.pitch = -1.0
-                elif self.SendHighROS.pitch > 1.0: self.SendHighROS.pitch = 1.0
-
-                self.cur_X.publish(target_center[0])
-                self.tar_X.publish(320)
-                self.cur_Y.publish(target_center[1])
-                self.tar_Y.publish(240)
-                # rospy.loginfo("pitch: %f  distance: %f" % (self.SendHighROS.pitch,distance))
-
-        self.last_state = state
         self.high_cmd_pub.publish(self.SendHighROS)
+
+        self.cur_X.publish(target_center[0])
+        self.tar_X.publish(320)
+        self.cur_Y.publish(target_center[1])
+        self.tar_Y.publish(240)
         self.cmd_yaw.publish(self.SendHighROS.yaw)
         self.cmd_pitch.publish(self.SendHighROS.pitch)
-        self.cmd_mode.publish(state.mode)
+        self.cmd_rotateSpeed.publish(self.SendHighROS.rotateSpeed)
 
         if self.selected:
             cv_image, target_center = self.algorithm_run(cv_image)
