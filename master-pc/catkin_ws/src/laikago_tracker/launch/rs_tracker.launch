@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find laikago_tracker)/launch/rs_camera.launch" />
+    <node pkg="laikago_real"      name="laikago_ros_to_lcm_server" type="walk_lcm" respawn="true" />
+    <node pkg="laikago_tracker"   name="laikago_tracker"           type="tracker.py" output="screen"/>
+</launch>
