@@ -1749,3 +1749,5 @@ master-pc/catkin_ws/src/.vscode/settings.json
 master-pc/catkin_ws/src/laikago_tracker/.vscode/c_cpp_properties.json
 master-pc/catkin_ws/src/laikago_tracker/.vscode/settings.json
 master-pc/lcm-server/lcm_server
+master-pc/catkin_ws/src/realsense-ros
+master-pc/catkin_ws/src/VINS-Fusion
