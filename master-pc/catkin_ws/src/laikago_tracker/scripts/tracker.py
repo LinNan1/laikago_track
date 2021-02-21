@@ -44,14 +44,16 @@ class Tracker:
         self.pid_pitch = PID(self.P, self.I, self.D, setpoint=240)
         self.pid_pitch.output_limits = (-0.1, 0.1)
 
-        self.pid_sideSpeed = PID(0.002, 0.0, 0.0002, setpoint=320)
-        self.pid_sideSpeed.output_limits = (-1.0, 1.0)
-        self.pid_rotateSpeed = PID(0.02, 0.0, 0.0002, setpoint=320)
+        self.pid_sideSpeed = PID(0.005, 0.0, 0.0005, setpoint=320)
+        self.pid_sideSpeed.output_limits = (0.0, 0.0)
+        self.pid_rotateSpeed = PID(0.005, 0.0, 0.0005, setpoint=320)
         self.pid_rotateSpeed.output_limits = (-1.0, 1.0)
 
         self.safe_distance = 1 # m
-        self.pid_forwardSpeed = PID(0.08, 0.0, 0.0015, setpoint=self.safe_distance)
+        self.pid_forwardSpeed = PID(0.25, 0.0, 0.0015, setpoint=self.safe_distance)
         self.pid_forwardSpeed.output_limits = (-1.0,1.0)
+
+        self.contol_flag = False
 
         self.cur_X = rospy.Publisher('/laikago_traker/cur_X',Int32,queue_size=10)
         self.tar_X = rospy.Publisher('/laikago_traker/tar_X',Int32,queue_size=10)
@@ -158,38 +160,63 @@ class Tracker:
         self.SendHighROS.rotateSpeed = 0.0
         
         if target_center != (-1,-1):
+
             distance = depth_array[target_center[1]][target_center[0]]/1000
-            tmp = 0.7
-            if distance <= safe_distance and (320 - tmp*320) < target_center[0]< (320 + tmp*320):
-                self.SendHighROS.mode = 0
-                if state.forwardSpeed = 0.0
-                    self.SendHighROS.yaw -= self.pid_yaw(target_center[0])
-                    if self.SendHighROS.yaw < -1.0: self.SendHighROS.yaw = -1.0
-                    elif self.SendHighROS.yaw > 1.0: self.SendHighROS.yaw = 1.0
-                    self.SendHighROS.pitch -= self.pid_pitch(target_center[1])
-                    if self.SendHighROS.pitch < -1.0: self.SendHighROS.pitch = -1.0
-                    elif self.SendHighROS.pitch > 1.0: self.SendHighROS.pitch = 1.0
+            tmp = 0.2
+            tmp2 = 0.6
+            # if distance <= safe_distance and (320 - tmp*320) < target_center[0]< (320 + tmp*320):
+            if distance <= safe_distance:
+                if (target_center[0] < (320 - tmp*320) or target_center[0] > (320 + tmp*320)) and self.contol_flag:
+                    self.SendHighROS.mode = 2
+                    self.SendHighROS.forwardSpeed = 0.0
+                    self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
+                    self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
                 else:
-                    self.SendHighROS.roll  = 0
-                    self.SendHighROS.pitch = 0
-                    self.SendHighROS.yaw = 0
-                    self.pid_pitch.reset()
-                    self.pid_yaw.reset()
+                    self.contol_flag = False
+                    self.SendHighROS.mode = 0
+                    if state.forwardSpeed == 0.0:
+                        self.SendHighROS.sideSpeed = 0.0
+                        self.SendHighROS.rotateSpeed = 0.0
+                        self.pid_sideSpeed.reset()
+                        self.pid_rotateSpeed.reset()
+
+                        self.SendHighROS.yaw -= self.pid_yaw(target_center[0])
+                        if self.SendHighROS.yaw < -1.0: self.SendHighROS.yaw = -1.0
+                        elif self.SendHighROS.yaw > 1.0: self.SendHighROS.yaw = 1.0
+                        self.SendHighROS.pitch -= self.pid_pitch(target_center[1])
+                        if self.SendHighROS.pitch < -1.0: self.SendHighROS.pitch = -1.0
+                        elif self.SendHighROS.pitch > 1.0: self.SendHighROS.pitch = 1.0
+
+                        if self.SendHighROS.yaw < -0.6 or self.SendHighROS.yaw > 0.6:
+                            self.contol_flag = True
+                            self.SendHighROS.mode = 2
+                            self.SendHighROS.forwardSpeed = 0.0
+                            self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
+                            self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
+
+                    else:
+                        self.SendHighROS.roll  = 0
+                        self.SendHighROS.pitch = 0
+                        self.SendHighROS.yaw = 0
+                        self.pid_pitch.reset()
+                        self.pid_yaw.reset()
+                    
             else:
+                self.contol_flag = False
                 self.SendHighROS.mode = 2
                 self.SendHighROS.forwardSpeed = self.pid_forwardSpeed(-distance)
-                self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
-                self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
+                self.SendHighROS.sideSpeed = 0.5*self.pid_sideSpeed(target_center[0])
+                self.SendHighROS.rotateSpeed = 0.6*self.pid_rotateSpeed(target_center[0])
             
             
+            self.cur_X.publish(target_center[0])
+            self.tar_X.publish(320)
+            self.cur_Y.publish(target_center[1])
+            self.tar_Y.publish(240)
             # rospy.loginfo("pitch: %f  distance: %f" % (self.SendHighROS.pitch,distance))
-
         self.high_cmd_pub.publish(self.SendHighROS)
 
-        self.cur_X.publish(target_center[0])
-        self.tar_X.publish(320)
-        self.cur_Y.publish(target_center[1])
-        self.tar_Y.publish(240)
+        
         self.cmd_yaw.publish(self.SendHighROS.yaw)
         self.cmd_pitch.publish(self.SendHighROS.pitch)
         self.cmd_rotateSpeed.publish(self.SendHighROS.rotateSpeed)
