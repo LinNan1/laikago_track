@@ -9,7 +9,6 @@ import dlib
 import numpy as np
 from sensor_msgs.msg import Image
 from std_msgs.msg import Int32,Float32
-from pyzbar import pyzbar
 from cv_bridge import CvBridge, CvBridgeError
 from laikago_tracker.srv import tracking_target,tracking_targetResponse
 from laikago_msgs.msg import HighCmd, HighState
@@ -44,21 +43,25 @@ class Tracker:
         self.pid_pitch = PID(self.P, self.I, self.D, setpoint=240)
         self.pid_pitch.output_limits = (-0.1, 0.1)
 
-        self.pid_sideSpeed = PID(0.005, 0.0, 0.0005, setpoint=320)
-        self.pid_sideSpeed.output_limits = (0.0, 0.0)
-        self.pid_rotateSpeed = PID(0.005, 0.0, 0.0005, setpoint=320)
+        self.pid_sideSpeed = PID(0.000002, 0.0, 0.0000002, setpoint=320)
+        self.pid_sideSpeed.output_limits = (-1.0, 1.0)
+        self.pid_rotateSpeed = PID(0.000103833984375, 0.0, 0.0, setpoint=320)
         self.pid_rotateSpeed.output_limits = (-1.0, 1.0)
 
         self.safe_distance = 1 # m
-        self.pid_forwardSpeed = PID(0.25, 0.0, 0.0015, setpoint=self.safe_distance)
+        self.pid_forwardSpeed = PID(1.0, 0.0, 0.0, setpoint=-self.safe_distance)
         self.pid_forwardSpeed.output_limits = (-1.0,1.0)
 
-        self.contol_flag = False
+        self.control_flag = False
+        self.control_duration = 0
+        self.control_start_undetected = rospy.Time.now()
 
         self.cur_X = rospy.Publisher('/laikago_traker/cur_X',Int32,queue_size=10)
         self.tar_X = rospy.Publisher('/laikago_traker/tar_X',Int32,queue_size=10)
         self.cur_Y = rospy.Publisher('/laikago_traker/cur_Y',Int32,queue_size=10)
         self.tar_Y = rospy.Publisher('/laikago_traker/tar_Y',Int32,queue_size=10)
+        self.cur_distance = rospy.Publisher('/laikago_traker/cur_distance',Float32,queue_size=10)
+        self.tar_distance = rospy.Publisher('/laikago_traker/tar_distance',Float32,queue_size=10)
         self.cmd_yaw = rospy.Publisher('/laikago_traker/cmd_yaw',Float32,queue_size=10)
         self.cmd_pitch = rospy.Publisher('/laikago_traker/cmd_pitch',Float32,queue_size=10)
         self.cmd_rotateSpeed = rospy.Publisher('/laikago_traker/cmd_rotateSpeed',Float32,queue_size=10)
@@ -94,38 +97,42 @@ class Tracker:
         # cv2.rectangle(image, pt1, pt2, (255, 255, 255), 3)
 
         # aruco
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
-        parameters =  aruco.DetectorParameters_create()
-        corners, ids, rejectedImgPoints = aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
-        if len(corners) > 0:
-            ids = ids.flatten()
-            for markerCorner,markerID in zip(corners,ids):
-                if markerID == 11:
-                    markerCorner = markerCorner.reshape((4, 2))
-                    (topLeft, topRight, bottomRight, bottomLeft) = markerCorner
+        # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # aruco_dict = aruco.Dictionary_get(aruco.DICT_6X6_250)
+        # parameters =  aruco.DetectorParameters_create()
+        # corners, ids, rejectedImgPoints = aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
+        # if len(corners) > 0:
+        #     ids = ids.flatten()
+        #     for markerCorner,markerID in zip(corners,ids):
+        #         if markerID == 11:
+        #             markerCorner = markerCorner.reshape((4, 2))
+        #             (topLeft, topRight, bottomRight, bottomLeft) = markerCorner
                     
-                    topRight = (int(topRight[0]), int(topRight[1]))
-                    bottomRight = (int(bottomRight[0]), int(bottomRight[1]))
-                    bottomLeft = (int(bottomLeft[0]), int(bottomLeft[1]))
-                    topLeft = (int(topLeft[0]), int(topLeft[1]))
+        #             topRight = (int(topRight[0]), int(topRight[1]))
+        #             bottomRight = (int(bottomRight[0]), int(bottomRight[1]))
+        #             bottomLeft = (int(bottomLeft[0]), int(bottomLeft[1]))
+        #             topLeft = (int(topLeft[0]), int(topLeft[1]))
 
-                    cv2.line(image, topLeft, topRight, (255, 255, 255), 2)
-                    cv2.line(image, topRight, bottomRight, (255, 255, 255), 2)
-                    cv2.line(image, bottomRight, bottomLeft, (255, 255, 255), 2)
-                    cv2.line(image, bottomLeft, topLeft, (255, 255, 255), 2)
-                    cv2.putText(image, str(markerID),(topLeft[0], topLeft[1] - 15), cv2.FONT_HERSHEY_SIMPLEX,0.5, (0, 255, 0), 2)
-                    cX = int((topLeft[0] + bottomRight[0]) / 2.0)
-                    cY = int((topLeft[1] + bottomRight[1]) / 2.0)
-                    cv2.circle(image, (cX, cY), 4, (0, 0, 255), -1)
+        #             cv2.line(image, topLeft, topRight, (255, 255, 255), 2)
+        #             cv2.line(image, topRight, bottomRight, (255, 255, 255), 2)
+        #             cv2.line(image, bottomRight, bottomLeft, (255, 255, 255), 2)
+        #             cv2.line(image, bottomLeft, topLeft, (255, 255, 255), 2)
+        #             cv2.putText(image, str(markerID),(topLeft[0], topLeft[1] - 15), cv2.FONT_HERSHEY_SIMPLEX,0.5, (0, 255, 0), 2)
+        #             cX = int((topLeft[0] + bottomRight[0]) / 2.0)
+        #             cY = int((topLeft[1] + bottomRight[1]) / 2.0)
+        #             cv2.circle(image, (cX, cY), 4, (0, 0, 255), -1)
 
-                    obj_center = (cX,cY)
+        #             obj_center = (cX,cY)
+
         # meanshift
-        # hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        # dst = cv2.calcBackProject([hsv],[0],self.roi_hist,[0,180],1)
-        # retval, self.track_wnd = cv2.meanShift(dst,self.track_wnd,self.term_crit)
-        # x,y,w,h = self.track_wnd
-        # cv2.rectangle(image, (x,y), (x+w,y+h), (255, 255, 255), 3)
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        dst = cv2.calcBackProject([hsv],[0],self.roi_hist,[0,180],1)
+        retval, self.track_wnd = cv2.meanShift(dst,self.track_wnd,self.term_crit)
+        x,y,w,h = self.track_wnd
+        obj_center = (x+w/2,y+h/2)
+        cv2.rectangle(image, (x,y), (x+w,y+h), (255, 255, 255), 3)
+
+
 
         image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
         image = cv2.resize(image, (320,240), interpolation = cv2.INTER_AREA)
@@ -136,7 +143,8 @@ class Tracker:
         try:
             cv_image = self.bridge.imgmsg_to_cv2(image, "bgr8")
             depth_image = self.bridge.imgmsg_to_cv2(depth, "passthrough")
-
+            depth_array = np.array(depth_image, dtype=np.float32)
+            target_center = (-1,-1)
         except CvBridgeError as e:
             print(e)
 
@@ -146,39 +154,40 @@ class Tracker:
         else:
             self.play_buffer.append(cv_image)  # select img
 
-
-        depth_array = np.array(depth_image, dtype=np.float32)
-        
-        cv_image, target_center = self.algorithm_run(cv_image)
-        
-        
         safe_distance = self.safe_distance
-
-        self.SendHighROS.mode = 0
-        self.SendHighROS.forwardSpeed = 0.0
-        self.SendHighROS.sideSpeed = 0.0
-        self.SendHighROS.rotateSpeed = 0.0
+        if self.selected:
+            cv_image, target_center = self.algorithm_run(cv_image)
         
         if target_center != (-1,-1):
-
+            self.control_start_undetected = rospy.Time.now()
             distance = depth_array[target_center[1]][target_center[0]]/1000
-            tmp = 0.2
-            tmp2 = 0.6
-            # if distance <= safe_distance and (320 - tmp*320) < target_center[0]< (320 + tmp*320):
-            if distance <= safe_distance:
-                if (target_center[0] < (320 - tmp*320) or target_center[0] > (320 + tmp*320)) and self.contol_flag:
+            tmp = 0.1
+            if safe_distance - 0.2 <= distance <= safe_distance:
+                # if (target_center[0] < (320 - tmp*320) or target_center[0] > (320 + tmp*320)) and self.control_flag and (self.control_duration < 100):
+                if (target_center[0] < (320 - 0.01*320) or target_center[0] > (320 + 0.01*320)) and self.control_flag:
                     self.SendHighROS.mode = 2
                     self.SendHighROS.forwardSpeed = 0.0
-                    self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
-                    self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
+                    self.SendHighROS.sideSpeed += self.pid_sideSpeed(target_center[0]) / distance
+                    self.SendHighROS.rotateSpeed += self.pid_rotateSpeed(target_center[0])
+                    self.control_duration += 1
                 else:
-                    self.contol_flag = False
-                    self.SendHighROS.mode = 0
+                    self.control_flag = False
+                    self.control_duration = 0
+                    self.SendHighROS.mode = 1
+                    self.SendHighROS.forwardSpeed = 0.0
+                    self.SendHighROS.sideSpeed = 0.0
+                    self.SendHighROS.rotateSpeed = 0.0
+                    self.pid_forwardSpeed.reset()
+                    self.pid_sideSpeed.reset()
+                    self.pid_rotateSpeed.reset()
                     if state.forwardSpeed == 0.0:
+                        self.SendHighROS.forwardSpeed = 0.0
                         self.SendHighROS.sideSpeed = 0.0
                         self.SendHighROS.rotateSpeed = 0.0
+                        self.pid_forwardSpeed.reset()
                         self.pid_sideSpeed.reset()
                         self.pid_rotateSpeed.reset()
+                        
 
                         self.SendHighROS.yaw -= self.pid_yaw(target_center[0])
                         if self.SendHighROS.yaw < -1.0: self.SendHighROS.yaw = -1.0
@@ -188,44 +197,48 @@ class Tracker:
                         elif self.SendHighROS.pitch > 1.0: self.SendHighROS.pitch = 1.0
 
                         if self.SendHighROS.yaw < -0.6 or self.SendHighROS.yaw > 0.6:
-                            self.contol_flag = True
+                            self.control_flag = True
                             self.SendHighROS.mode = 2
                             self.SendHighROS.forwardSpeed = 0.0
-                            self.SendHighROS.sideSpeed = self.pid_sideSpeed(target_center[0])
-                            self.SendHighROS.rotateSpeed = self.pid_rotateSpeed(target_center[0])
+                            self.SendHighROS.sideSpeed += self.pid_sideSpeed(target_center[0]) / distance
+                            self.SendHighROS.rotateSpeed += self.pid_rotateSpeed(target_center[0])
 
                     else:
+                        self.SendHighROS.mode = 1
                         self.SendHighROS.roll  = 0
-                        self.SendHighROS.pitch = 0
+                        #self.SendHighROS.pitch = 0
                         self.SendHighROS.yaw = 0
                         self.pid_pitch.reset()
                         self.pid_yaw.reset()
                     
             else:
-                self.contol_flag = False
+                self.control_flag = False
+
+                self.SendHighROS.yaw = 0
+
                 self.SendHighROS.mode = 2
                 self.SendHighROS.forwardSpeed = self.pid_forwardSpeed(-distance)
-                self.SendHighROS.sideSpeed = 0.5*self.pid_sideSpeed(target_center[0])
-                self.SendHighROS.rotateSpeed = 0.6*self.pid_rotateSpeed(target_center[0])
-            
+                self.SendHighROS.sideSpeed += self.pid_sideSpeed(target_center[0]) /distance
+                self.SendHighROS.rotateSpeed += self.pid_rotateSpeed(target_center[0])
             
             self.cur_X.publish(target_center[0])
             self.tar_X.publish(320)
             self.cur_Y.publish(target_center[1])
             self.tar_Y.publish(240)
-            # rospy.loginfo("pitch: %f  distance: %f" % (self.SendHighROS.pitch,distance))
+            self.cur_distance.publish(distance)
+            self.tar_distance.publish(self.safe_distance)
+
+        elif rospy.Time.now().to_nsec() - self.control_start_undetected.to_nsec() > 500000000:
+            self.SendHighROS.mode = 1
+            self.SendHighROS.forwardSpeed = 0
+            self.SendHighROS.rotateSpeed = 0
+            self.SendHighROS.sideSpeed = 0
+
         self.high_cmd_pub.publish(self.SendHighROS)
 
-        
         self.cmd_yaw.publish(self.SendHighROS.yaw)
         self.cmd_pitch.publish(self.SendHighROS.pitch)
         self.cmd_rotateSpeed.publish(self.SendHighROS.rotateSpeed)
-
-        if self.selected:
-            cv_image, target_center = self.algorithm_run(cv_image)
-
-        # TO DO
-        
 
         try:
             self.track_res_pub.publish(self.bridge.cv2_to_imgmsg(cv_image, "passthrough"))
@@ -285,7 +298,7 @@ class Tracker:
 def main(args):
     rospy.init_node('tracker', anonymous=True)
     tracker = Tracker()
-    # thread.start_new_thread(tracker.select_target_thread,())
+    thread.start_new_thread(tracker.select_target_thread,())
     try:
         rospy.spin()
     except KeyboardInterrupt:

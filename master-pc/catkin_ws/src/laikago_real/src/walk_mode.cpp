@@ -63,8 +63,9 @@ int main(int argc, char *argv[])
         
         high_state_pub.publish(RecvHighROS);
 
-        roslcm.Send(SendHighLCM); // 不安全, debug使用
-        
+        // roslcm.Send(SendHighLCM);  // 不安全, debug使用
+
+        SendHighLCM = {0};
         // printf("%f\n",  RecvHighROS.forwardSpeed);
         ros::spinOnce();
         loop_rate.sleep(); 
