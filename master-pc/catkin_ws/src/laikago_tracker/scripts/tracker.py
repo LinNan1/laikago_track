@@ -26,12 +26,8 @@ class Tracker:
         self.time_syn = message_filters.ApproximateTimeSynchronizer([self.image_sub,self.depth_sub,self.state_sub], 10, 0.1, allow_headerless=True)
         self.time_syn.registerCallback(self.sub_callback)
         self.play_buffer = []
-        self.mouse_down = False
-        self.points_left_top_selected = []
-        self.points_right_bottom_selected = []
-        self.selected = False
-        self.rect  = []
-        self.track_screenshot = None
+        self.selected =  False
+        self.initBB = None
         # contol
         self.SendHighROS = HighCmd()
         self.RecvHighROS = HighState()
@@ -66,35 +62,49 @@ class Tracker:
         self.cmd_pitch = rospy.Publisher('/laikago_traker/cmd_pitch',Float32,queue_size=10)
         self.cmd_rotateSpeed = rospy.Publisher('/laikago_traker/cmd_rotateSpeed',Float32,queue_size=10)
         
-        
-    def algorithm_init(self):
+    def select_target_thread(self):
+        window_1 = 'Press "s" to select'
+        cv2.namedWindow(window_1,cv2.WINDOW_AUTOSIZE)
+        while True:
+            if len(self.play_buffer) > 0:
+                color_image = self.play_buffer.pop(0)
+                cv2.imshow(window_1,color_image)
+            key = cv2.waitKey(1)
+            if key & 0xFF == ord('s') or key == 27:
+                cv2.setWindowTitle(window_1,'Select a ROI and then press SPACE or ENTER button!')
+                self.initBB = cv2.selectROI(window_1,color_image,fromCenter=False,showCrosshair=True)
+                break
+        cv2.destroyWindow(window_1)
+        self.algorithm_init(color_image)
+        self.selected = True
+
+    def algorithm_init(self,image):
+        x,y,w,h = self.initBB
         # correlation
         # self.object_tracker = dlib.correlation_tracker()
-        # self.object_tracker.start_track(self.track_screenshot,dlib.rectangle(*self.rect[-1]))
+        # self.object_tracker.start_track(image,dlib.rectangle(x,y,x+w,y+h))
  
         # meanshift
-        xmin,ymin,xmax,ymax = (self.points_left_top_selected[-1][0],
-                               self.points_left_top_selected[-1][1],
-                               self.points_right_bottom_selected[-1][0],
-                               self.points_right_bottom_selected[-1][1])
-        self.track_wnd = (xmin,ymin,xmax-xmin,ymax-ymin)
-        roi = self.track_screenshot[ymin:ymax,xmin:xmax] # region of interest
-        hsv_roi = cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv_roi, (0,60,32), (180,255,255))
-        self.roi_hist = cv2.calcHist([hsv_roi], [0], mask, [180], [0,180])
-        cv2.normalize(self.roi_hist, self.roi_hist,0,255,cv2.NORM_MINMAX)
-        self.term_crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1)
+        # xmin,ymin,xmax,ymax = x,y,x+w,y+h
+        # self.track_wnd = (x,y,w,h)
+        # roi = image[ymin:ymax,xmin:xmax] # region of interest
+        # hsv_roi = cv2.cvtColor(roi,cv2.COLOR_BGR2HSV)
+        # mask = cv2.inRange(hsv_roi, (0,60,32), (180,255,255))
+        # self.roi_hist = cv2.calcHist([hsv_roi], [0], mask, [180], [0,180])
+        # cv2.normalize(self.roi_hist, self.roi_hist,0,255,cv2.NORM_MINMAX)
+        # self.term_crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1)
 
-        
+        # opencv tracker
+        # self.object_tracker = cv2.TrackerKCF_create()
+        # self.object_tracker = cv2.TrackerBoosting_create()
+        # self.object_tracker = cv2.TrackerMIL_create()
+        # self.object_tracker = cv2.TrackerTLD_create()
+        # self.object_tracker = cv2.TrackerMedianFlow_create()
+        self.object_tracker = cv2.TrackerMOSSE_create()
+        self.object_tracker.init(image,self.initBB)
 
     def algorithm_run(self,image):
         obj_center = (-1,-1)
-        # correlation
-        # self.object_tracker.update(image)
-        # target_rect = self.object_tracker.get_position()
-        # pt1 = (int(target_rect.left()), int(target_rect.top()))
-        # pt2 = (int(target_rect.right()), int(target_rect.bottom()))
-        # cv2.rectangle(image, pt1, pt2, (255, 255, 255), 3)
 
         # aruco
         # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -107,12 +117,10 @@ class Tracker:
         #         if markerID == 11:
         #             markerCorner = markerCorner.reshape((4, 2))
         #             (topLeft, topRight, bottomRight, bottomLeft) = markerCorner
-                    
         #             topRight = (int(topRight[0]), int(topRight[1]))
         #             bottomRight = (int(bottomRight[0]), int(bottomRight[1]))
         #             bottomLeft = (int(bottomLeft[0]), int(bottomLeft[1]))
         #             topLeft = (int(topLeft[0]), int(topLeft[1]))
-
         #             cv2.line(image, topLeft, topRight, (255, 255, 255), 2)
         #             cv2.line(image, topRight, bottomRight, (255, 255, 255), 2)
         #             cv2.line(image, bottomRight, bottomLeft, (255, 255, 255), 2)
@@ -121,21 +129,42 @@ class Tracker:
         #             cX = int((topLeft[0] + bottomRight[0]) / 2.0)
         #             cY = int((topLeft[1] + bottomRight[1]) / 2.0)
         #             cv2.circle(image, (cX, cY), 4, (0, 0, 255), -1)
-
         #             obj_center = (cX,cY)
 
+        # correlation
+        # self.object_tracker.update(image)
+        # target_rect = self.object_tracker.get_position()
+        # pt1 = (int(target_rect.left()), int(target_rect.top()))
+        # pt2 = (int(target_rect.right()), int(target_rect.bottom()))
+        # cX, cY = (pt1[0]+pt2[0])/2, (pt1[1]+pt2[1])/2
+        # cX = 640-1 if cX >= 640 else cX
+        # cY = 480-1 if cY >= 480 else cY
+        # obj_center = (cX,cY)
+        # cv2.rectangle(image, pt1, pt2, (255, 255, 255), 3)
+
         # meanshift
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        dst = cv2.calcBackProject([hsv],[0],self.roi_hist,[0,180],1)
-        retval, self.track_wnd = cv2.meanShift(dst,self.track_wnd,self.term_crit)
-        x,y,w,h = self.track_wnd
-        obj_center = (x+w/2,y+h/2)
-        cv2.rectangle(image, (x,y), (x+w,y+h), (255, 255, 255), 3)
+        # hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # dst = cv2.calcBackProject([hsv],[0],self.roi_hist,[0,180],1)
+        # retval, self.track_wnd = cv2.meanShift(dst,self.track_wnd,self.term_crit)
+        # x,y,w,h = self.track_wnd
+        # cX, cY = x+w/2, y+h/2
+        # cX = 640-1 if cX >= 640 else cX
+        # cY = 480-1 if cY >= 480 else cY
+        # obj_center = (cX,cY)
+        # cv2.rectangle(image, (x,y), (x+w,y+h), (255, 255, 255), 3)
 
+        # opencv tracker
+        (success, box) = self.object_tracker.update(image)
+        if success:
+            (x,y,w,h) = [int(v) for v in box]
+            cv2.rectangle(image,(x,y),(x+w,y+h),(255,255,255),3)
+            cX, cY = x+w/2, y+h/2
+            cX = 640-1 if cX >= 640 else cX
+            cY = 480-1 if cY >= 480 else cY
+            obj_center = (cX,cY)
 
-
-        image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-        image = cv2.resize(image, (320,240), interpolation = cv2.INTER_AREA)
+        # image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+        # image = cv2.resize(image, (320,240), interpolation = cv2.INTER_AREA)
         return image, obj_center
 
     def sub_callback(self,image,depth,state):
@@ -155,12 +184,12 @@ class Tracker:
             self.play_buffer.append(cv_image)  # select img
 
         safe_distance = self.safe_distance
-        if self.selected:
+        if self.selected:  
             cv_image, target_center = self.algorithm_run(cv_image)
         
         if target_center != (-1,-1):
             self.control_start_undetected = rospy.Time.now()
-            distance = depth_array[target_center[1]][target_center[0]]/1000
+            distance = depth_array[target_center[1]][target_center[0]]/1000 + 0.000000001
             tmp = 0.1
             if safe_distance - 0.2 <= distance <= safe_distance:
                 # if (target_center[0] < (320 - tmp*320) or target_center[0] > (320 + tmp*320)) and self.control_flag and (self.control_duration < 100):
@@ -246,53 +275,7 @@ class Tracker:
              print(e)
         
 
-    def select_target_thread(self):
-        # Step 1: screen shot
-        window_1 = 'Press "p" to puase'
-        cv2.namedWindow(window_1,cv2.WINDOW_AUTOSIZE)
-        while True:
-            if len(self.play_buffer) > 0:
-                color_image = self.play_buffer.pop(0)
-                cv2.imshow(window_1,color_image)
-            key = cv2.waitKey(1)
-            
-            if key & 0xFF == ord('p') or key == 27:
-                break
-        # Step 2: select object
-        cv2.setWindowTitle(window_1,'Press "s" to select')
-        cv2.imshow(window_1,color_image)
-        mouse_active = [True]
-        def on_mouse(event,x,y,flags,param):
-            if mouse_active[-1]:
-                if event == cv2.EVENT_LBUTTONDOWN:
-                    self.mouse_down = True
-                    self.points_left_top_selected.append((x,y))
-                    print('left-top: ({},{})'.format(x,y))
-                elif event == cv2.EVENT_LBUTTONUP and self.mouse_down == True:
-                    self.mouse_down = False
-                    self.points_right_bottom_selected.append((x,y))
-                    print('right-bottom: ({},{})'.format(x,y))
-                elif event == cv2.EVENT_MOUSEMOVE and self.mouse_down == True:
-                    im_draw = color_image.copy()
-                    cv2.rectangle(im_draw, self.points_left_top_selected[-1], (x, y), (255,255,255), 3)
-                    cv2.imshow(window_1, im_draw)
-        cv2.setMouseCallback(window_1, on_mouse)
-        while True:
-            if len(self.points_left_top_selected) == len(self.points_right_bottom_selected) and len(self.points_left_top_selected):
-                # xmin,ymin,xmax,ymax
-                self.rect.append((self.points_left_top_selected[-1][0],
-                                  self.points_left_top_selected[-1][1],
-                                  self.points_right_bottom_selected[-1][0],
-                                  self.points_right_bottom_selected[-1][1]))
-            key = cv2.waitKey(1)
-            if key & 0xFF == ord('s') or key == 27:
-                mouse_active.append(False)
-                break
-        cv2.destroyWindow(window_1)
-        self.track_screenshot = color_image
-        # Step 3: track setup
-        self.algorithm_init()
-        self.selected = True
+
     
 
 def main(args):
